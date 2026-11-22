@@ -28,12 +28,14 @@ async def process_token(message: Message, state: FSMContext):
         return await message.answer("<b>Ошибка.</b> Неверный формат токена.")
     
     await state.clear()
-    # Сохраняем в базу (упрощенно)
     token_enc = _fernet.encrypt(token.encode())
+    
+    # Передаем bot_name, чтобы фиксануть ошибку
     async with get_pool().acquire() as conn:
         await conn.execute(
-            "INSERT INTO sub_bots (owner_id, token_enc, bot_username) VALUES ($1, $2, $3)",
-            message.from_user.id, token_enc, "pending_bot"
+            "INSERT INTO sub_bots (owner_id, token_enc, bot_username, bot_name) "
+            "VALUES ($1, $2, $3, $4)",
+            message.from_user.id, token_enc, "pending_bot", "Sputnik Bot"
         )
     
     text = (
