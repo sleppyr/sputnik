@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from keyboards import main_menu, back_menu
 from config import ADMIN_IDS, FREE_BOTS
 from db import get_pool
-from shop import shop_menu # Импортируем меню магазина
+from shop import shop_menu 
 
 router = Router()
 
@@ -19,6 +19,10 @@ GREETING = (
 
 @router.message(CommandStart())
 async def start_cmd(m: Message):
+    # Создаем юзера в базе при старте
+    async with get_pool().acquire() as conn:
+        await conn.execute("INSERT INTO owners (user_id) VALUES ($1) ON CONFLICT DO NOTHING", m.from_user.id)
+        
     await m.answer(GREETING, reply_markup=main_menu(m.from_user.id in ADMIN_IDS))
 
 @router.callback_query(F.data == "shop")
@@ -29,21 +33,23 @@ async def cb_shop_redirect(cb: CallbackQuery):
 @router.callback_query(F.data == "profile")
 async def cb_profile(cb: CallbackQuery):
     async with get_pool().acquire() as conn:
-        # Проверяем премиум
-        row = await conn.fetchrow("SELECT premium_until FROM owners WHERE user_id = $1", cb.from_user.id)
+        row = await conn.fetchrow("SELECT premium_until, bought_slots FROM owners WHERE user_id = $1", cb.from_user.id)
         owned = await conn.fetchval("SELECT COUNT(*) FROM sub_bots WHERE owner_id = $1", cb.from_user.id)
     
+    bought = row["bought_slots"] if row else 0
+    total_limit = FREE_BOTS + bought
     prem_status = "❌ Нет"
+    
     if row and row["premium_until"]:
-        prem_status = "✅ Активен"
+        prem_status = f"✅ До {row['premium_until'].strftime('%Y-%m-%d')}"
 
     text = (
         "<b>👤 Ваш профиль</b>\n\n"
         f"<b>ID:</b> <code>{cb.from_user.id}</code>\n"
         f"<b>Имя:</b> {cb.from_user.full_name}\n"
-        f"<b>Активных ботов:</b> {owned} / {FREE_BOTS + 5}\n"
+        f"<b>Ботов:</b> {owned} / {total_limit}\n"
         f"<b>Премиум:</b> {prem_status}\n\n"
-        f"<i>Для расширения лимита перейдите в магазин.</i>"
+        f"<i>Для покупки слотов перейдите в магазин.</i>"
     )
     await cb.message.edit_text(text, reply_markup=back_menu())
     await cb.answer()
