@@ -1,6 +1,6 @@
-# child_bot/router.py
+# bots/child_bot/router.py
 from aiogram import Router
-from child_bot import start, code_entry, session_flow
+from bots.child_bot import start, code_entry, session_flow
 
 def build(bot_id: int) -> Router:
     r = Router(name=f"child_{bot_id}")
