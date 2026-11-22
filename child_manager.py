@@ -1,52 +1,35 @@
-# child_manager.py
 import asyncio
-import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-
-from db import get_pool
-from utils import decrypt
-from bots.child_bot.router import build as build_child_router
-
-log = logging.getLogger("child_manager")
+from db import get_pool, _fernet
+from bots.child_bot.router import build
 
 class ChildManager:
-    def __init__(self) -> None:
-        self._runners: dict[int, asyncio.Task] = {}
+    def __init__(self):
+        self.runners = {}
 
-    async def spawn(self, sub_bot_id: int, token: str) -> None:
-        if sub_bot_id in self._runners:
-            return
-        task = asyncio.create_task(self._run(sub_bot_id, token))
-        self._runners[sub_bot_id] = task
+    async def spawn(self, bot_id: int, token: str):
+        if bot_id in self.runners: return
+        task = asyncio.create_task(self._run(bot_id, token))
+        self.runners[bot_id] = task
 
-    async def _run(self, sub_bot_id: int, token: str) -> None:
+    async def _run(self, bot_id: int, token: str):
         bot = Bot(token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-        dp  = Dispatcher()
-        dp["bot_id"] = sub_bot_id
-        dp.include_router(build_child_router(sub_bot_id))
+        dp = Dispatcher()
+        dp["bot_id"] = bot_id
+        dp.include_router(build(bot_id))
         try:
             await dp.start_polling(bot)
-        except Exception as exc:
-            log.exception("child %s crashed: %s", sub_bot_id, exc)
         finally:
             await bot.session.close()
-            self._runners.pop(sub_bot_id, None)
+            self.runners.pop(bot_id, None)
 
-    async def stop(self, sub_bot_id: int) -> None:
-        task = self._runners.pop(sub_bot_id, None)
-        if task:
-            task.cancel()
-
-    async def load_all(self) -> None:
+    async def load_all(self):
         async with get_pool().acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT id, token_enc FROM sub_bots WHERE is_active = TRUE"
-            )
-        for row in rows:
-            token = decrypt(row["token_enc"])
-            if token:
-                await self.spawn(row["id"], token)
+            rows = await conn.fetch("SELECT id, token_enc FROM sub_bots")
+            for r in rows:
+                token = _fernet.decrypt(r["token_enc"]).decode()
+                await self.spawn(r["id"], token)
 
 manager = ChildManager()
