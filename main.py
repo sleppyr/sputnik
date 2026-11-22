@@ -9,8 +9,8 @@ from config import BOT_TOKEN
 from db import init_db, close_db
 from child_manager import manager
 
-from main_bot import router as main_bot_router
-from main_bot import admin, captures, create_flow, menu
+from bots.main_bot import router as main_bot_router
+from bots.main_bot import admin, captures, create_flow, menu
 
 logging.basicConfig(level=logging.INFO)
 
