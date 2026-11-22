@@ -71,6 +71,12 @@ CREATE TABLE IF NOT EXISTS admin_log (
 
 async def init_db() -> None:
     global _pool
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL is empty. Set it in Railway Variables "
+            "(copy the connection string from your Postgres service)."
+        )
+    
     _pool = await asyncpg.create_pool(
         dsn=DATABASE_URL,
         min_size=PG_POOL_MIN,
