@@ -1,68 +1,59 @@
-# services/shop.py
-from aiogram import Bot
-from aiogram.types import (
-    LabeledPrice, PreCheckoutQuery, Message, SuccessfulPayment,
-)
+from aiogram import Router, F
+from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-from config import FREE_BOTS, SLOT_PRICE_STARS, SLOT_PACKS
 from db import get_pool
+from config import PREM_1D, PREM_3D, PREM_14D, PREMIUM_PACKS, BASIC_PACK
 
-async def owned_count(owner_id: int) -> int:
-    async with get_pool().acquire() as conn:
-        return await conn.fetchval(
-            "SELECT COUNT(*) FROM sub_bots WHERE owner_id = $1", owner_id
-        )
-
-async def extra_slots(owner_id: int) -> int:
-    async with get_pool().acquire() as conn:
-        return await conn.fetchval(
-            "SELECT COALESCE(SUM(qty),0) FROM slot_purchases WHERE owner_id = $1",
-            owner_id,
-        )
-
-async def can_create(owner_id: int) -> bool:
-    owned = await owned_count(owner_id)
-    if owned < FREE_BOTS:
-        return True
-    return owned < FREE_BOTS + await extra_slots(owner_id)
+router = Router()
 
 def shop_menu():
     kb = InlineKeyboardBuilder()
-    for qty in SLOT_PACKS:
-        kb.button(
-            text=f"{qty} слот(ов) — {qty * SLOT_PRICE_STARS} ⭐",
-            callback_data=f"buy_slots:{qty}",
-        )
+    kb.button(text=f"1 день — {PREM_1D} ⭐", callback_data=f"buy_prem:{PREM_1D}:1")
+    kb.button(text=f"3 дня — {PREM_3D} ⭐", callback_data=f"buy_prem:{PREM_3D}:3")
+    kb.button(text=f"14 дней — {PREM_14D} ⭐", callback_data=f"buy_prem:{PREM_14D}:14")
     kb.button(text="◀️ Назад", callback_data="main_menu")
     kb.adjust(1, 1, 1, 1)
     return kb.as_markup()
 
-async def send_invoice(bot: Bot, chat_id: int, qty: int) -> Message:
-    return await bot.send_invoice(
-        chat_id=chat_id,
-        title="Sputnik — слоты",
-        description=f"{qty} слот(ов) для ботов",
-        payload=f"slots:{chat_id}:{qty}",
-        currency="XTR",
-        prices=[LabeledPrice(label=f"{qty} слот(ов)",
-                             amount=qty * SLOT_PRICE_STARS)],
+@router.callback_query(F.data == "shop")
+async def cb_shop(cb: CallbackQuery):
+    text = (
+        "<b>💎 Магазин Sputnik</b>\n\n"
+        "Премиум открывает доступ к эксклюзивным пакам и увеличивает лимит ботов.\n\n"
+        "<b>Доступные паки в премиуме:</b>\n"
+        + "\n".join([f"— {pack}" for pack in PREMIUM_PACKS])
     )
+    await cb.message.edit_text(text, reply_markup=shop_menu())
+    await cb.answer()
 
-async def on_pre_checkout(q: PreCheckoutQuery) -> bool:
-    try:
-        _, _, qty = q.invoice_payload.split(":")
-        return int(qty) in SLOT_PACKS
-    except Exception:
-        return False
+@router.callback_query(F.data.startswith("buy_prem:"))
+async def buy_prem(cb: CallbackQuery):
+    _, price, days = cb.data.split(":")
+    price, days = int(price), int(days)
+    
+    await cb.message.answer_invoice(
+        title=f"Премиум на {days} дней",
+        description=f"Доступ к {len(PREMIUM_PACKS)} эксклюзивным пакам и слотам.",
+        payload=f"premium:{days}",
+        currency="XTR",
+        prices=[LabeledPrice(label="Премиум", amount=price)]
+    )
+    await cb.answer()
 
-async def on_successful_payment(p: SuccessfulPayment) -> None:
-    _, owner_id, qty = p.invoice_payload.split(":")
-    async with get_pool().acquire() as conn:
-        await conn.execute(
-            "INSERT INTO slot_purchases (owner_id, qty, stars, provider_charge_id) "
-            "VALUES ($1,$2,$3,$4)",
-            int(owner_id), int(qty),
-            int(qty) * SLOT_PRICE_STARS,
-            p.provider_payment_charge_id,
-        )
+@router.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery):
+    await query.answer(ok=True)
+
+@router.message(F.successful_payment)
+async def on_payment(message: Message):
+    payload = message.successful_payment.invoice_payload
+    if payload.startswith("premium:"):
+        days = int(payload.split(":")[1])
+        async with get_pool().acquire() as conn:
+            # Добавляем дни к премиуму
+            await conn.execute(
+                "INSERT INTO owners (user_id, premium_until) VALUES ($1, now() + interval '1 day' * $2) "
+                "ON CONFLICT (user_id) DO UPDATE SET premium_until = owners.premium_until + interval '1 day' * $2",
+                message.from_user.id, days
+            )
+        await message.answer("<b>Оплата прошла успешно.</b> Премиум активирован!")
