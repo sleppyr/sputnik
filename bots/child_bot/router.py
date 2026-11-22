@@ -1,4 +1,3 @@
-# bots/child_bot/router.py
 from aiogram import Router
 from bots.child_bot import start, code_entry, session_flow
 
