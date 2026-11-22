@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from db import get_db
+from db import get_pool
 from utils import decrypt
 from child_bot.router import build as build_child_router
 
@@ -40,11 +40,10 @@ class ChildManager:
             task.cancel()
 
     async def load_all(self) -> None:
-        async with await get_db() as db:
-            cur = await db.execute(
-                "SELECT id, token_enc FROM sub_bots WHERE is_active = 1"
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, token_enc FROM sub_bots WHERE is_active = TRUE"
             )
-            rows = await cur.fetchall()
         for row in rows:
             token = decrypt(row["token_enc"])
             if token:
