@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 
 from db import get_pool
 from utils import decrypt
-from child_bot.router import build as build_child_router
+from bots.child_bot.router import build as build_child_router
 
 log = logging.getLogger("child_manager")
 
